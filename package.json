@@ -1,0 +1,13 @@
+{
+	"name": "ballcrack",
+	"version": "1.0.0",
+	"description": "Ballcrack",
+	"main": "src/index.js",
+	"scripts": {
+		"build": "node build.js",
+		"watch": "node build.js --watch"
+	},
+	"dependencies": {
+		"esbuild": "^0.25.11"
+	}
+}
