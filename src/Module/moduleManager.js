@@ -18,6 +18,7 @@ import Spider from "./modules/movement/Spider";
 import Step from "./modules/movement/Step";
 import ArrayList from "./modules/visual/Arraylist";
 import Chams from "./modules/visual/Chams";
+import Chams from "./modules/visual/Freecam";
 import ClickGUI from "./modules/visual/ClickGUI";
 
 import Watermark from "./modules/visual/Watermark";
@@ -57,6 +58,7 @@ export default {
             ClickGUI,
             ArrayList,
             Chams,
+            Freecam,
 
             // movement
             Airjump,
