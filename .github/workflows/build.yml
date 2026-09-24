@@ -2,26 +2,33 @@ name: Node.js CI Build
 
 on:
   push:
-    branches: [ "**" ] # Запускать при пуше/комитe в любую ветку
+    branches: [ "**" ]
   pull_request:
-    branches: [ "**" ] # Запускать также при пул-реквестах
+    branches: [ "**" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Чтение репозитория (Checkout)
+      - name: Чтение репозитория
         uses: actions/checkout@v4
 
       - name: Установка Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Рекомендуемая LTS версия Node.js
-          cache: 'npm'       # Кэширование зависимостей для ускорения сборки
+          node-version: '20'
+          cache: 'npm'
 
       - name: Установка зависимостей
         run: npm ci
 
       - name: Сборка проекта
         run: npm run build
+
+      # Загрузка содержимого папки dist как artifact
+      - name: Загрузка результатов сборки (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ballcrack-build
+          path: dist/
