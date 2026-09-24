@@ -4,31 +4,31 @@ import Module from "../../Module";
 export default class Freecam extends Module {
     constructor() {
         super("Freecam", "Visual", "Free camera movement");
-        
-        // Настройки по умолчанию
+
+        // Настройки
         this.speed = 7.0;
         this.sensitivity = 1.0;
         this.fastMultiplier = 3.0;
 
         // Внутреннее состояние
         this.keys = Object.create(null);
-        this.freePosition = null;
+        this.freePosition = { x: 0, y: 0, z: 0 };
         this.yaw = 0;
         this.pitch = 0;
         this.lastFrame = performance.now();
-        
+
         this.originalParent = null;
         this.originalIndex = -1;
         this.originalPosition = null;
         this.originalRotation = null;
         this.originalQuaternion = null;
         this.savedPerspective = null;
-        
-        // Привязываем контекст для обработчиков событий
+
+        // Привязка контекста
         this._onKeyDown = this.onKeyDown.bind(this);
         this._onKeyUp = this.onKeyUp.bind(this);
         this._onMouseMove = this.onMouseMove.bind(this);
-        this._onLoop = this.loop.bind(this);
+        this._loop = this.loop.bind(this);
         this.animFrameId = null;
     }
 
@@ -38,21 +38,39 @@ export default class Freecam extends Module {
         const camera = this.resolveCamera();
 
         if (!player || !camera) {
-            this.toggle(); // Если нет игрока или камеры, отключаем
+            console.warn("[Freecam] Не удалось найти игрока или камеру!");
+            this.toggle(); // Отключаем модуль, если игра еще не загрузилась
             return;
         }
 
         this.camera = camera;
         this.player = player;
 
-        // Сохраняем исходное состояние камеры
+        // 1. Сохраняем исходное состояние камеры
         this.originalParent = camera.parent || null;
-        this.originalIndex = Array.isArray(camera.parent?.children) ? camera.parent.children.indexOf(camera) : -1;
+        if (this.originalParent && Array.isArray(this.originalParent.children)) {
+            this.originalIndex = this.originalParent.children.indexOf(camera);
+        }
         this.originalPosition = this.cloneXYZ(camera.position);
         this.originalRotation = this.cloneRotation(camera.rotation);
         this.originalQuaternion = this.cloneQuaternion(camera.quaternion);
 
-        // Переключаем в 3rd-person perspective при необходимости
+        // 2. Получаем мировой позицию и поворот ДО отсоединения
+        const worldPos = { x: 0, y: 0, z: 0 };
+        if (typeof camera.getWorldPosition === 'function') {
+            camera.getWorldPosition(worldPos);
+        } else {
+            const origin = this.getPlayerCameraOrigin(player);
+            worldPos.x = origin.x;
+            worldPos.y = origin.y;
+            worldPos.z = origin.z;
+        }
+
+        this.freePosition = { x: worldPos.x, y: worldPos.y, z: worldPos.z };
+        this.pitch = this.clamp(camera.rotation?.x || player.pitch || 0, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+        this.yaw = camera.rotation?.y || player.yaw || 0;
+
+        // 3. Переключаем в 3rd-person perspective (чтобы тело игрока рендерилось)
         if (Number.isFinite(Number(player.perspective))) {
             this.savedPerspective = Number(player.perspective);
             if (this.savedPerspective === 0) {
@@ -63,39 +81,35 @@ export default class Freecam extends Module {
             }
         }
 
-        // Отсоединяем камеру от игрока и прикрепляем к сцене
+        // 4. Отсоединяем камеру и переносим её прямо в Scene
         this.detachCamera(camera);
 
-        // Устанавливаем стартовую позицию и повороты
-        this.freePosition = this.getPlayerCameraOrigin(player) || this.cloneXYZ(camera.position);
-        this.pitch = this.clamp(camera.rotation?.x || player.pitch || 0, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
-        this.yaw = camera.rotation?.y || player.yaw || 0;
+        // Применяем начальную позицию в новых мировых координатах
+        this.applyPose();
 
         this.clearKeys();
         this.lastFrame = performance.now();
 
-        // Навешиваем слушатели событий ввода
+        // 5. Слушатели событий
         window.addEventListener('keydown', this._onKeyDown, true);
         window.addEventListener('keyup', this._onKeyUp, true);
         window.addEventListener('mousemove', this._onMouseMove, true);
 
-        // Запускаем игровой цикл обновления
-        this.loop();
+        // 6. Запуск цикла
+        this.animFrameId = requestAnimationFrame(this._loop);
     }
 
     onDisable() {
-        // Останавливаем цикл
         if (this.animFrameId) {
             cancelAnimationFrame(this.animFrameId);
             this.animFrameId = null;
         }
 
-        // Снимаем слушатели
         window.removeEventListener('keydown', this._onKeyDown, true);
         window.removeEventListener('keyup', this._onKeyUp, true);
         window.removeEventListener('mousemove', this._onMouseMove, true);
 
-        // Восстанавливаем позицию и иерархию камеры
+        // Возвращаем камеру родителю
         if (this.camera) {
             if (this.originalParent && this.camera.parent !== this.originalParent) {
                 this.restoreCameraParent(this.camera);
@@ -103,10 +117,13 @@ export default class Freecam extends Module {
             if (this.originalPosition) this.copyXYZ(this.camera.position, this.originalPosition);
             if (this.originalQuaternion) this.copyQuaternion(this.camera.quaternion, this.originalQuaternion);
             if (this.originalRotation) this.copyRotation(this.camera.rotation, this.originalRotation);
-            try { this.camera.updateMatrixWorld?.(true); } catch (_) {}
+            
+            try { 
+                this.camera.updateMatrixWorld?.(true); 
+            } catch (_) {}
         }
 
-        // Восстанавливаем перспективу игрока
+        // Возвращаем перспективу игрока
         if (this.player && this.savedPerspective !== null) {
             if (Number(this.player.perspective) !== this.savedPerspective) {
                 this.player.perspective = this.savedPerspective;
@@ -117,19 +134,18 @@ export default class Freecam extends Module {
         }
 
         this.clearKeys();
-        this.freePosition = null;
         this.camera = null;
         this.player = null;
     }
 
     loop() {
-        if (!this.isEnabled) return;
+        if (!this.state) return; // Проверка состояния флага из базового класса Module
 
         const now = performance.now();
         const dt = this.clamp((now - this.lastFrame) / 1000, 0, 0.05);
         this.lastFrame = now;
 
-        if (this.camera && this.freePosition && document.pointerLockElement && !this.isTypingOrUiOpen()) {
+        if (this.camera && document.pointerLockElement && !this.isTypingOrUiOpen()) {
             let forward = 0;
             let strafe = 0;
             let vertical = 0;
@@ -161,12 +177,14 @@ export default class Freecam extends Module {
         }
 
         this.neutralizePlayerInput();
-        this.animFrameId = requestAnimationFrame(this._onLoop);
+        this.animFrameId = requestAnimationFrame(this._loop);
     }
 
     applyPose() {
         if (!this.camera || !this.freePosition) return;
+        
         this.copyXYZ(this.camera.position, this.freePosition);
+        
         if (this.camera.rotation) {
             if (typeof this.camera.rotation.set === 'function') {
                 this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
@@ -176,6 +194,10 @@ export default class Freecam extends Module {
                 this.camera.rotation.z = 0;
             }
         }
+        
+        try {
+            this.camera.updateMatrixWorld?.(true);
+        } catch (_) {}
     }
 
     resolveCamera() {
@@ -197,7 +219,7 @@ export default class Freecam extends Module {
 
         if (scene && scene !== parent && typeof scene.add === 'function') {
             if (typeof scene.attach === 'function') {
-                scene.attach(camera);
+                scene.attach(camera); // Метод attach пересчитывает координаты с учетом сцены
             } else {
                 parent.remove?.(camera);
                 scene.add(camera);
@@ -220,7 +242,7 @@ export default class Freecam extends Module {
     }
 
     onKeyDown(event) {
-        if (!this.isEnabled || this.isTypingOrUiOpen()) return;
+        if (!this.state || this.isTypingOrUiOpen()) return;
         const movementKeys = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight'];
         if (movementKeys.includes(event.code)) {
             this.keys[event.code] = true;
@@ -236,7 +258,7 @@ export default class Freecam extends Module {
     }
 
     onMouseMove(event) {
-        if (!this.isEnabled || !document.pointerLockElement || this.isTypingOrUiOpen()) return;
+        if (!this.state || !document.pointerLockElement || this.isTypingOrUiOpen()) return;
         const sens = 0.0022 * this.clamp(this.sensitivity, 0.1, 3);
         this.yaw -= Number(event.movementX || 0) * sens;
         this.pitch -= Number(event.movementY || 0) * sens;
@@ -263,7 +285,7 @@ export default class Freecam extends Module {
 
     getPlayerCameraOrigin(player) {
         const pos = player?.pos || player?.position;
-        if (!pos) return null;
+        if (!pos) return { x: 0, y: 0, z: 0 };
         let eyeHeight = typeof player?.getEyeHeight === 'function' ? Number(player.getEyeHeight()) : Number(player?.eyeHeight || 1.62);
         return { x: pos.x, y: pos.y + eyeHeight, z: pos.z };
     }
