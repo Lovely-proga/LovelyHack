@@ -8,7 +8,7 @@ export default class OwnerSpoof extends Module {
     }
 
     onEnable() {
-        mobxUtils.defineMobxProp(hooks.game.serverInfo, "permissionLevel", () => 200, (v) => {});
+        mobxUtils.defineMobxProp(hooks.game.serverInfo, "permissionLevel", () => 500, (v) => {});
     }
 
     onDisable() {
