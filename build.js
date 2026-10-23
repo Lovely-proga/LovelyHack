@@ -33,52 +33,24 @@ const common = {
   entryPoints: ["src/index.js"],
   bundle: true,
   minify: true,
+  format: "iife",
+  platform: "browser",
   loader: { ".css": "text" }
 };
 
-async function buildBookmarklet() {
-  const result = await esbuild.build({
-    ...common,
-    format: "iife",
-    platform: "browser",
-    write: false
-  });
-
-  const code = result.outputFiles[0].text;
-  const wrapped =
-    "javascript:" +
-    encodeURIComponent(`(()=>{${code}})()`);
-
-  fs.writeFileSync("dist/bookmarklet.txt", wrapped);
-  log("bookmarklet");
-}
-
 async function run(watch = false) {
-  const normal = await esbuild.context({
-    ...common,
-    outfile: "dist/ballcrack.js",
-    plugins: [logPlugin("normal")]
-  });
-
   const user = await esbuild.context({
     ...common,
-    format: "iife",
-    platform: "browser",
     banner: { js: meta },
     outfile: "dist/ballcrack.user.js",
     plugins: [logPlugin("user")]
   });
 
   if (watch) {
-    await normal.watch();
     await user.watch();
-    await buildBookmarklet();
     log("initial (watch)");
   } else {
-    await normal.rebuild();
     await user.rebuild();
-    await buildBookmarklet();
-    await normal.dispose();
     await user.dispose();
   }
 }
